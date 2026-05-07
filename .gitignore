@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.python-version
+env/
+venv/
+ENV/
+.venv/
+
+# SQLite database
+*.db
+
+# Logs and runtime files
+*.log
+*.log.*
+*.pid
+*.seed
+
+# Flask/WSGI
+instance/
+.webassets-cache
+
+# IDEs and editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Arduino / ESP32 builds
+*.elf
+*.bin
+*.hex
+*.map
+build/
+*.pio/
+.pio/
+
+# Misc
+*.tmp
+*.tmp.*
+*.bak
+*.orig
+
+# Node modules (if any)
+node_modules/
