@@ -13,6 +13,12 @@ const char* password = "12345678";
 const char* BOTtoken = "8608535596:AAH3trNFwW1dlJIifgR2c6_VCV37R7B_Glw"; 
 const char* CHAT_ID = "-1003714141923   "; // Use your 10-digit ID here
 
+// Static IP Configuration
+IPAddress staticIP(192, 168, 1, 100);
+IPAddress gateway(192, 168, 1, 1);
+IPAddress subnet(255, 255, 255, 0);
+IPAddress dns(8, 8, 8, 8);
+
 // NTP Server for Timestamps
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 19800; // India Time: GMT +5:30 (5.5 * 3600)
@@ -141,6 +147,8 @@ void setup() {
   
   if (esp_camera_init(&config) != ESP_OK) Serial.println("Camera Failed");
 
+  // Set static IP
+  WiFi.config(staticIP, gateway, subnet, dns);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
   Serial.println("\nWiFi Ready.");

@@ -12,7 +12,7 @@ RUN:
   python register_staff.py
 
 PHOTO REQUIREMENTS:
-  - 3 photos per staff member:
+  - 3 photos per staff member captured from ESP32-CAM:
       front.jpg  → facing camera directly
       left.jpg   → 45° left side view
       right.jpg  → 45° right side view
@@ -25,6 +25,7 @@ PHOTO REQUIREMENTS:
 
 import os
 import shutil
+import requests
 from deepface import DeepFace
 
 STAFF_DB_PATH = "staff_db"
@@ -51,6 +52,10 @@ def register_new_staff():
     print("\n" + "=" * 50)
     print("  REGISTER NEW STAFF MEMBER")
     print("=" * 50)
+
+    # Hardcoded ESP32 IP
+    esp_ip = "192.168.1.100"
+    print(f"\nUsing ESP32-CAM at: {esp_ip}")
 
     # Get staff details
     staff_id = input("\nEnter Staff ID (e.g. 001, 002): ").strip().zfill(3)
@@ -81,8 +86,8 @@ def register_new_staff():
     }
 
     print(f"\nRegistering: {staff_name} (ID: {staff_id})")
-    print("Provide paths to 3 photos.\n")
-    print("TIP: Drag and drop the photo file into this terminal window to get its path.\n")
+    print("Capturing 3 photos from ESP32-CAM.\n")
+    print("Ensure staff is positioned correctly for each photo.\n")
 
     saved_photos = []
 
@@ -91,37 +96,57 @@ def register_new_staff():
         while True:
             attempt += 1
             print(f"📷  Photo {len(saved_photos)+1}/3: {description}")
-            photo_path = input("   Path to photo: ").strip().strip('"').strip("'")
+            input("   Press Enter when ready to capture...")
 
-            if not photo_path:
-                print("   Please enter a file path.\n")
-                continue
+            # Capture photo from ESP32
+            try:
+                url = f"http://{esp_ip}/capture"
+                response = requests.get(url, timeout=10)
+                if response.status_code != 200:
+                    print(f"   ❌ ESP32 error: {response.status_code}")
+                    if attempt < 3:
+                        print("   Try again.\n")
+                        continue
+                    else:
+                        skip = input("   Skip this photo and continue? (yes/no): ").strip().lower()
+                        if skip == "yes":
+                            print(f"   Skipped {filename}.\n")
+                            break
+                        attempt = 0
+                        continue
 
-            if not os.path.exists(photo_path):
-                print(f"   ❌ File not found: {photo_path}")
-                print("   Please check the path and try again.\n")
-                continue
-
-            if not photo_path.lower().endswith(('.jpg', '.jpeg', '.png')):
-                print("   ❌ Please use a JPG or PNG photo.\n")
-                continue
-
-            print("   🔍 Checking for face...", end=" ", flush=True)
-            if verify_face(photo_path):
+                # Save the image
                 dest = os.path.join(folder_path, filename)
-                shutil.copy2(photo_path, dest)
-                print(f"✅ Face detected — saved as {filename}")
-                saved_photos.append(filename)
-                print()
-                break
-            else:
-                print("❌ No face detected.")
+                with open(dest, "wb") as f:
+                    f.write(response.content)
+
+                print("   🔍 Checking for face...", end=" ", flush=True)
+                if verify_face(dest):
+                    print(f"✅ Face detected — saved as {filename}")
+                    saved_photos.append(filename)
+                    print()
+                    break
+                else:
+                    print("❌ No face detected.")
+                    os.remove(dest)  # Remove invalid photo
+                    if attempt < 3:
+                        print("   Tips for better photos:")
+                        print("   → Make sure face is clearly visible")
+                        print("   → Better lighting (no shadows on face)")
+                        print("   → Move closer to camera")
+                        print("   → Remove anything blocking the face\n")
+                    else:
+                        skip = input("   Skip this photo and continue? (yes/no): ").strip().lower()
+                        if skip == "yes":
+                            print(f"   Skipped {filename}.\n")
+                            break
+                        attempt = 0
+
+            except requests.exceptions.RequestException as e:
+                print(f"   ❌ Connection error: {e}")
                 if attempt < 3:
-                    print("   Tips for better photos:")
-                    print("   → Make sure face is clearly visible")
-                    print("   → Better lighting (no shadows on face)")
-                    print("   → Move closer to camera")
-                    print("   → Remove anything blocking the face\n")
+                    print("   Check ESP32 IP and connection.\n")
+                    continue
                 else:
                     skip = input("   Skip this photo and continue? (yes/no): ").strip().lower()
                     if skip == "yes":
