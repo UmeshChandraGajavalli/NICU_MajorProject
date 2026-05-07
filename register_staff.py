@@ -12,7 +12,7 @@ RUN:
   python register_staff.py
 
 PHOTO REQUIREMENTS:
-  - 3 photos per staff member captured from ESP32-CAM:
+  - 3 photos per staff member captured from laptop camera:
       front.jpg  → facing camera directly
       left.jpg   → 45° left side view
       right.jpg  → 45° right side view
@@ -25,7 +25,7 @@ PHOTO REQUIREMENTS:
 
 import os
 import shutil
-import requests
+import cv2
 from deepface import DeepFace
 
 STAFF_DB_PATH = "staff_db"
@@ -53,9 +53,7 @@ def register_new_staff():
     print("  REGISTER NEW STAFF MEMBER")
     print("=" * 50)
 
-    # Hardcoded ESP32 IP
-    esp_ip = "192.168.1.100"
-    print(f"\nUsing ESP32-CAM at: {esp_ip}")
+    print("\nUsing laptop camera for photo capture.")
 
     # Get staff details
     staff_id = input("\nEnter Staff ID (e.g. 001, 002): ").strip().zfill(3)
@@ -86,7 +84,7 @@ def register_new_staff():
     }
 
     print(f"\nRegistering: {staff_name} (ID: {staff_id})")
-    print("Capturing 3 photos from ESP32-CAM.\n")
+    print("Capturing 3 photos from laptop camera.\n")
     print("Ensure staff is positioned correctly for each photo.\n")
 
     saved_photos = []
@@ -98,55 +96,55 @@ def register_new_staff():
             print(f"📷  Photo {len(saved_photos)+1}/3: {description}")
             input("   Press Enter when ready to capture...")
 
-            # Capture photo from ESP32
-            try:
-                url = f"http://{esp_ip}/capture"
-                response = requests.get(url, timeout=10)
-                if response.status_code != 200:
-                    print(f"   ❌ ESP32 error: {response.status_code}")
-                    if attempt < 3:
-                        print("   Try again.\n")
-                        continue
-                    else:
-                        skip = input("   Skip this photo and continue? (yes/no): ").strip().lower()
-                        if skip == "yes":
-                            print(f"   Skipped {filename}.\n")
-                            break
-                        attempt = 0
-                        continue
-
-                # Save the image
-                dest = os.path.join(folder_path, filename)
-                with open(dest, "wb") as f:
-                    f.write(response.content)
-
-                print("   🔍 Checking for face...", end=" ", flush=True)
-                if verify_face(dest):
-                    print(f"✅ Face detected — saved as {filename}")
-                    saved_photos.append(filename)
-                    print()
-                    break
-                else:
-                    print("❌ No face detected.")
-                    os.remove(dest)  # Remove invalid photo
-                    if attempt < 3:
-                        print("   Tips for better photos:")
-                        print("   → Make sure face is clearly visible")
-                        print("   → Better lighting (no shadows on face)")
-                        print("   → Move closer to camera")
-                        print("   → Remove anything blocking the face\n")
-                    else:
-                        skip = input("   Skip this photo and continue? (yes/no): ").strip().lower()
-                        if skip == "yes":
-                            print(f"   Skipped {filename}.\n")
-                            break
-                        attempt = 0
-
-            except requests.exceptions.RequestException as e:
-                print(f"   ❌ Connection error: {e}")
+            # Capture photo from laptop camera
+            cap = cv2.VideoCapture(0)
+            if not cap.isOpened():
+                print("   ❌ Cannot access camera.")
                 if attempt < 3:
-                    print("   Check ESP32 IP and connection.\n")
+                    print("   Try again.\n")
                     continue
+                else:
+                    skip = input("   Skip this photo and continue? (yes/no): ").strip().lower()
+                    if skip == "yes":
+                        print(f"   Skipped {filename}.\n")
+                        break
+                    attempt = 0
+                    continue
+
+            ret, frame = cap.read()
+            cap.release()
+            if not ret:
+                print("   ❌ Capture failed.")
+                if attempt < 3:
+                    print("   Try again.\n")
+                    continue
+                else:
+                    skip = input("   Skip this photo and continue? (yes/no): ").strip().lower()
+                    if skip == "yes":
+                        print(f"   Skipped {filename}.\n")
+                        break
+                    attempt = 0
+                    continue
+
+            # Save the image
+            dest = os.path.join(folder_path, filename)
+            cv2.imwrite(dest, frame)
+
+            print("   🔍 Checking for face...", end=" ", flush=True)
+            if verify_face(dest):
+                print(f"✅ Face detected — saved as {filename}")
+                saved_photos.append(filename)
+                print()
+                break
+            else:
+                print("❌ No face detected.")
+                os.remove(dest)  # Remove invalid photo
+                if attempt < 3:
+                    print("   Tips for better photos:")
+                    print("   → Make sure face is clearly visible")
+                    print("   → Better lighting (no shadows on face)")
+                    print("   → Move closer to camera")
+                    print("   → Remove anything blocking the face\n")
                 else:
                     skip = input("   Skip this photo and continue? (yes/no): ").strip().lower()
                     if skip == "yes":

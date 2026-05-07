@@ -40,6 +40,7 @@ import os
 import json
 import threading
 import sqlite3
+import cv2
 
 app = Flask(__name__)
 
@@ -51,7 +52,7 @@ STAFF_DB_PATH        = "staff_db"         # Folder with staff photos
 VIOLATIONS_PATH      = "violations"       # Folder to save violation photos
 LOG_FILE             = "violations_log.json"
 DB_FILE              = "violations.db"
-CONFIDENCE_THRESHOLD = 80                 # Minimum % to confirm identity
+CONFIDENCE_THRESHOLD = 60                 # Minimum % to confirm identity
                                           # Below this → reported as "Unknown"
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -287,12 +288,13 @@ def count_today_violations(staff_name):
 @app.route("/violation", methods=["POST"])
 def handle_violation():
     """
-    ESP32-CAM POSTs raw JPEG bytes to this endpoint.
+    For testing: Captures photo from laptop camera.
+    In production: ESP32-CAM POSTs raw JPEG bytes to this endpoint.
     This function:
-    1. Saves the photo with a timestamp filename
+    1. Captures/saves the photo with a timestamp filename
     2. Runs face recognition in a background thread
     3. Sends enriched Telegram alert
-    Returns immediately so ESP32-CAM doesn't time out.
+    Returns immediately.
     """
 
     # Generate timestamp for filename
@@ -300,14 +302,29 @@ def handle_violation():
     timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
     img_path  = os.path.join(VIOLATIONS_PATH, f"{timestamp}.jpg")
 
-    # Save the photo
-    with open(img_path, "wb") as f:
-        f.write(request.data)
+    # Capture photo from laptop camera
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("[Server] ❌ Cannot access camera.")
+        return jsonify({"status": "error", "message": "Camera not available"}), 500
 
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        print("[Server] ❌ Capture failed.")
+        return jsonify({"status": "error", "message": "Capture failed"}), 500
+
+    # Save the photo
+    cv2.imwrite(img_path, frame)
     file_size = os.path.getsize(img_path)
     print(f"\n{'='*50}")
-    print(f"[Server] ✓ Violation photo received!")
+    print(f"[Server] ✓ Violation photo captured!")
     print(f"[Server]   Saved: {img_path} ({file_size} bytes)")
+
+    # Run recognition in background thread
+    def process_violation():
+        # Step 1: Identify staff
+        staff_name, confidence = identify_staff(img_path)
 
     # Run recognition in background thread
     # (So ESP32-CAM gets a fast HTTP 200 response)
@@ -367,6 +384,15 @@ def handle_violation():
 
     # Return immediately to ESP32-CAM
     return jsonify({"status": "received"}), 200
+
+
+@app.route("/test_violation", methods=["GET"])
+def test_violation():
+    """
+    Test endpoint: Triggers violation capture and processing via GET.
+    Opens in browser or curl to simulate.
+    """
+    return handle_violation()
 
 
 # ─── STATS ROUTE ──────────────────────────────────────────────────────────────
@@ -488,6 +514,7 @@ if __name__ == "__main__":
     print(f"  Confidence min   : {CONFIDENCE_THRESHOLD}%")
     print(f"  Endpoints:")
     print(f"    POST /violation  ← ESP32-CAM sends photo here")
+    print(f"    GET  /test_violation ← Test violation (captures from camera)")
     print(f"    GET  /ping       ← Health check")
     print(f"    GET  /stats      ← Today's violations")
     print(f"    GET  /staff      ← Registered staff list")
