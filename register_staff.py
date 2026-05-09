@@ -12,14 +12,15 @@ RUN:
   python register_staff.py
 
 PHOTO REQUIREMENTS:
-  - 3 photos per staff member captured from ESP32-CAM:
-      front.jpg  → facing camera directly
-      left.jpg   → 45° left side view
-      right.jpg  → 45° right side view
+  - 4 photos per staff member captured from ESP32-CAM:
+      front.jpg       → facing camera directly
+      left.jpg        → 45° left side view
+      right.jpg       → 45° right side view
+      front_mask.jpg  → facing camera with mask on
   - Wear hospital uniform in photos
   - Good lighting, face clearly visible
   - At least 640x480 resolution
-  - If staff wears mask in hospital → take photos WITH mask
+  - Last photo: wear the mask as normally used in hospital
 ============================================================
 """
 
@@ -82,11 +83,12 @@ def register_new_staff():
     photos = {
         "front.jpg": "FRONT — Staff faces camera directly (0°)",
         "left.jpg" : "LEFT  — Staff turns 45° to their left",
-        "right.jpg": "RIGHT — Staff turns 45° to their right"
+        "right.jpg": "RIGHT — Staff turns 45° to their right",
+        "front_mask.jpg": "FRONT WITH MASK — Staff faces camera with mask on (0°)"
     }
 
     print(f"\nRegistering: {staff_name} (ID: {staff_id})")
-    print("Capturing 3 photos from ESP32-CAM.\n")
+    print("Capturing 4 photos from ESP32-CAM.\n")
     print("Ensure staff is positioned correctly for each photo.\n")
 
     saved_photos = []
@@ -95,7 +97,7 @@ def register_new_staff():
         attempt = 0
         while True:
             attempt += 1
-            print(f"📷  Photo {len(saved_photos)+1}/3: {description}")
+            print(f"📷  Photo {len(saved_photos)+1}/4: {description}")
             input("   Press Enter when ready to capture...")
 
             # Capture photo from ESP32
@@ -168,8 +170,8 @@ def register_new_staff():
     print(f"   Photos : {', '.join(saved_photos)}")
     print("=" * 50)
 
-    if len(saved_photos) < 3:
-        print(f"\n⚠️  Only {len(saved_photos)}/3 photos saved.")
+    if len(saved_photos) < 4:
+        print(f"\n⚠️  Only {len(saved_photos)}/4 photos saved.")
         print("   Recognition accuracy will be lower.")
         print("   Add more photos later by re-registering this staff member.\n")
 
@@ -218,7 +220,7 @@ def list_all_staff():
         for i, folder in enumerate(folders, 1):
             folder_path = os.path.join(STAFF_DB_PATH, folder)
             photos = [f for f in os.listdir(folder_path) if f.endswith(".jpg")]
-            status = "✅" if len(photos) >= 3 else f"⚠️  Only {len(photos)}/3 photos"
+            status = "✅" if len(photos) >= 4 else f"⚠️  Only {len(photos)}/4 photos"
             print(f"  {i:2}. {folder}")
             print(f"       Photos: {', '.join(photos)} {status}")
 

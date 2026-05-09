@@ -4,9 +4,9 @@
 
 #include <esp_now.h>
 
-const char* ssid = "vivotg";
+const char* ssid = "Umesh";
 
-const char* password = "12345678";
+const char* password = "Umesh123@";
 
 const char* mqtt_server = "demo.thingsboard.io";
 

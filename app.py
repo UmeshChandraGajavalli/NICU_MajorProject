@@ -4,7 +4,7 @@ NICU HAND HYGIENE SYSTEM
 Python Identification Server — app.py
 ============================================================
 FUNCTION:
-  - Receives violation photos from ESP32-CAM via HTTP POST
+  - Captures violation photos from LAPTOP CAMERA (for testing)
   - Runs DeepFace face recognition against staff_db/
   - Identifies which staff member violated
   - Sends enriched Telegram alert with:
@@ -40,7 +40,11 @@ import os
 import json
 import threading
 import sqlite3
+import cv2
 
+app = Flask(__name__)
+
+# ─── C
 app = Flask(__name__)
 
 # ─── CONFIGURATION — UPDATE THESE ─────────────────────────────────────────────
@@ -284,89 +288,211 @@ def count_today_violations(staff_name):
 
 # ─── MAIN ROUTE — RECEIVES PHOTO FROM ESP32-CAM ───────────────────────────────
 
-@app.route("/violation", methods=["POST"])
+@app.route("/violation", methods=["GET", "POST"])
 def handle_violation():
     """
-    ESP32-CAM POSTs raw JPEG bytes to this endpoint.
+    ESP32-CAM sends violation photos to this endpoint.
     This function:
-    1. Saves the photo with a timestamp filename
-    2. Runs face recognition in a background thread
-    3. Sends enriched Telegram alert
-    Returns immediately so ESP32-CAM doesn't time out.
+    1. Receives photo from ESP32-CAM (multipart upload)
+    2. Saves the photo
+    3. Runs face recognition
+    4. Sends enriched Telegram alert with staff name & confidence
     """
+    
+    # Check if photo was uploaded from ESP32-CAM
+    if 'photo' in request.files:
+        file = request.files['photo']
+        if file.filename == '':
+            return jsonify({"status": "error", "message": "No file selected"}), 400
+        
+        # Generate timestamp for filename
+        now       = datetime.datetime.now()
+        timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+        img_path  = os.path.join(VIOLATIONS_PATH, f"{timestamp}.jpg")
+        
+        # Save uploaded photo
+        file.save(img_path)
+        file_size = os.path.getsize(img_path)
+        
+        print(f"\n{'='*60}")
+        print(f"[Server] ✓ Violation photo received from ESP32-CAM!")
+        print(f"[Server]   Saved: {img_path} ({file_size} bytes)")
+        
+        # Run recognition in background thread
+        # def process_violation():
+        #     # Step 1: Identify staff
+        #     staff_name, confidence = identify_staff(img_path)
+            
+        #     # Step 2: Log the violation
+        #     log_violation(timestamp, staff_name, confidence, img_path)
+        #     save_violation_to_db(timestamp, staff_name, confidence, img_path)
+            
+        #     # Step 3: Count today's violations for this person
+        #     today_count = count_today_violations(staff_name)
+            
+        #     # Step 4: Build Telegram alert message
+        #     time_display = timestamp.replace("_", " ")
+            
+        #     if staff_name != "Unknown":
+        #         # ── Staff identified ──
+        #         caption = (
+        #             f"🔴 *HAND HYGIENE VIOLATION*\n"
+        #             f"━━━━━━━━━━━━━━━━━━━━\n"
+        #             f"🕐 *Time:* `{time_display}`\n"
+        #             f"👤 *Staff:* {staff_name}\n"
+        #             f"📊 *Confidence:* {confidence}%\n"
+        #             f"🔢 *Violations today:* {today_count}\n"
+        #             f"📍 *Location:* NICU Warmer Area\n"
+        #             f"━━━━━━━━━━━━━━━━━━━━"
+        #         )
+                
+        #         # Add repeat offender warning
+        #         if today_count >= 3:
+        #             caption += "\n\n🚨 *REPEAT OFFENDER*\nImmediate intervention required!"
+        #         elif today_count == 2:
+        #             caption += "\n\n⚠️ *Second violation today — please take action.*"
+            
+        #     else:
+        #         # ── Staff not identified ──
+        #         caption = (
+        #             f"🔴 *HAND HYGIENE VIOLATION*\n"
+        #             f"━━━━━━━━━━━━━━━━━━━━\n"
+        #             f"🕐 *Time:* `{time_display}`\n"
+        #             f"👤 *Staff:* Not identified\n"
+        #             f"   _(Not in database or face not visible)_\n"
+        #             f"📍 *Location:* NICU Warmer Area\n"
+        #             f"━━━━━━━━━━━━━━━━━━━━"
+        #         )
+            
+        #     # Step 5: Send photo + caption to Telegram
+        #     send_telegram_photo(img_path, caption)
+            
+        #     print(f"[Server] Alert sent — {staff_name} | {confidence}% | {today_count} today")
+        #     print(f"{'='*60}\n")
+        
+        def process_violation():
+            try:
+                print("[DEBUG] Starting recognition...")
 
-    # Generate timestamp for filename
-    now       = datetime.datetime.now()
-    timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
-    img_path  = os.path.join(VIOLATIONS_PATH, f"{timestamp}.jpg")
+                staff_name, confidence = identify_staff(img_path)
 
-    # Save the photo
-    with open(img_path, "wb") as f:
-        f.write(request.data)
+                print("[DEBUG] Recognition done")
 
-    file_size = os.path.getsize(img_path)
-    print(f"\n{'='*50}")
-    print(f"[Server] ✓ Violation photo received!")
-    print(f"[Server]   Saved: {img_path} ({file_size} bytes)")
+                log_violation(timestamp, staff_name, confidence, img_path)
 
-    # Run recognition in background thread
-    # (So ESP32-CAM gets a fast HTTP 200 response)
-    def process_violation():
-        # Step 1: Identify staff
-        staff_name, confidence = identify_staff(img_path)
+                save_violation_to_db(timestamp, staff_name, confidence, img_path)
 
-        # Step 2: Log the violation
-        log_violation(timestamp, staff_name, confidence, img_path)
-        save_violation_to_db(timestamp, staff_name, confidence, img_path)
+                today_count = count_today_violations(staff_name)
 
-        # Step 3: Count today's violations for this person
-        today_count = count_today_violations(staff_name)
+                time_display = timestamp.replace("_", " ")
 
-        # Step 4: Build Telegram alert message
-        time_display = timestamp.replace("_", " ")
+                caption = (
+                    f"🔴 HAND HYGIENE VIOLATION\n"
+                    f"Time: {time_display}\n"
+                    f"Staff: {staff_name}\n"
+                    f"Confidence: {confidence}%"
+                )
 
-        if staff_name != "Unknown":
-            # ── Staff identified ──
-            caption = (
-                f"🔴 *HAND HYGIENE VIOLATION*\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"🕐 *Time:* `{time_display}`\n"
-                f"👤 *Staff:* {staff_name}\n"
-                f"📊 *Confidence:* {confidence}%\n"
-                f"🔢 *Violations today:* {today_count}\n"
-                f"📍 *Location:* NICU Warmer Area\n"
-                f"━━━━━━━━━━━━━━━━━━━━"
-            )
+                print("[DEBUG] Sending Telegram...")
 
-            # Add repeat offender warning
-            if today_count >= 3:
-                caption += "\n\n🚨 *REPEAT OFFENDER*\nImmediate intervention required!"
-            elif today_count == 2:
-                caption += "\n\n⚠️ *Second violation today — please take action.*"
+                send_telegram_photo(img_path, caption)
 
-        else:
-            # ── Staff not identified ──
-            caption = (
-                f"🔴 *HAND HYGIENE VIOLATION*\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"🕐 *Time:* `{time_display}`\n"
-                f"👤 *Staff:* Not identified\n"
-                f"   _(Not in database or face not visible)_\n"
-                f"📍 *Location:* NICU Warmer Area\n"
-                f"━━━━━━━━━━━━━━━━━━━━"
-            )
+                print("[DEBUG] Telegram sent!")
 
-        # Step 5: Send photo + caption to Telegram
-        send_telegram_photo(img_path, caption)
+            except Exception as e:
+                print(f"[ERROR] process_violation crashed: {e}")
+        
+        
+        # Start background processing
+        threading.Thread(target=process_violation, daemon=True).start()
+        
+        # Return immediately to ESP32-CAM
+        return jsonify({"status": "received"}), 200
+    
+    else:
+        # Fallback: Capture from laptop camera (for testing)
+        print("[Server] No photo uploaded. Capturing from laptop camera (test mode)...")
+        
+        now       = datetime.datetime.now()
+        timestamp = now.strftime("%Y-%m-%d_%H-%M-%S")
+        img_path  = os.path.join(VIOLATIONS_PATH, f"{timestamp}.jpg")
 
-        print(f"[Server] Alert sent — {staff_name} | {confidence}% | {today_count} today")
-        print(f"{'='*50}\n")
+        # Capture from laptop camera
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            print("[Server] ❌ Cannot access camera.")
+            return jsonify({"status": "error", "message": "Camera not available"}), 500
 
-    # Start background processing
-    threading.Thread(target=process_violation, daemon=True).start()
+        ret, frame = cap.read()
+        cap.release()
+        if not ret:
+            print("[Server] ❌ Capture failed.")
+            return jsonify({"status": "error", "message": "Capture failed"}), 500
 
-    # Return immediately to ESP32-CAM
-    return jsonify({"status": "received"}), 200
+        cv2.imwrite(img_path, frame)
+
+        file_size = os.path.getsize(img_path)
+        print(f"\n{'='*50}")
+        print(f"[Server] ✓ Violation photo captured from laptop!")
+        print(f"[Server]   Saved: {img_path} ({file_size} bytes)")
+
+        # Run recognition in background thread
+        def process_violation():
+            # Step 1: Identify staff
+            staff_name, confidence = identify_staff(img_path)
+
+            # Step 2: Log the violation
+            log_violation(timestamp, staff_name, confidence, img_path)
+            save_violation_to_db(timestamp, staff_name, confidence, img_path)
+
+            # Step 3: Count today's violations for this person
+            today_count = count_today_violations(staff_name)
+
+            # Step 4: Build Telegram alert message
+            time_display = timestamp.replace("_", " ")
+
+            if staff_name != "Unknown":
+                # ── Staff identified ──
+                caption = (
+                    f"🔴 *HAND HYGIENE VIOLATION*\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🕐 *Time:* `{time_display}`\n"
+                    f"👤 *Staff:* {staff_name}\n"
+                    f"📊 *Confidence:* {confidence}%\n"
+                    f"🔢 *Violations today:* {today_count}\n"
+                    f"📍 *Location:* NICU Warmer Area\n"
+                    f"━━━━━━━━━━━━━━━━━━━━"
+                )
+
+                # Add repeat offender warning
+                if today_count >= 3:
+                    caption += "\n\n🚨 *REPEAT OFFENDER*\nImmediate intervention required!"
+                elif today_count == 2:
+                    caption += "\n\n⚠️ *Second violation today — please take action.*"
+
+            else:
+                # ── Staff not identified ──
+                caption = (
+                    f"🔴 *HAND HYGIENE VIOLATION*\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🕐 *Time:* `{time_display}`\n"
+                    f"👤 *Staff:* Not identified\n"
+                    f"   _(Not in database or face not visible)_\n"
+                    f"📍 *Location:* NICU Warmer Area\n"
+                    f"━━━━━━━━━━━━━━━━━━━━"
+                )
+
+            # Step 5: Send photo + caption to Telegram
+            send_telegram_photo(img_path, caption)
+
+            print(f"[Server] Alert sent — {staff_name} | {confidence}% | {today_count} today")
+            print(f"{'='*50}\n")
+
+        # Start background processing
+        threading.Thread(target=process_violation, daemon=True).start()
+
+        # Return immediately to ESP32-CAM
+        return jsonify({"status": "received"}), 200
 
 
 # ─── STATS ROUTE ──────────────────────────────────────────────────────────────
@@ -468,7 +594,6 @@ def ping():
 
 
 # ─── STARTUP ──────────────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
     initialize_database()
 
@@ -487,15 +612,12 @@ if __name__ == "__main__":
     print(f"  Database file    : {DB_FILE}")
     print(f"  Confidence min   : {CONFIDENCE_THRESHOLD}%")
     print(f"  Endpoints:")
-    print(f"    POST /violation  ← ESP32-CAM sends photo here")
-    print(f"    GET  /ping       ← Health check")
-    print(f"    GET  /stats      ← Today's violations")
-    print(f"    GET  /staff      ← Registered staff list")
+    print(f"    POST /violation")
+    print(f"    GET  /ping")
     print("=" * 55)
 
-    if staff_count == 0:
-        print("\n⚠️  WARNING: No staff registered in staff_db/")
-        print("   All violations will be reported as 'Unknown'")
-        print("   Run: python register_staff.py  to add staff\n")
-
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=True
+    )
