@@ -280,8 +280,8 @@ void setup() {
 // }
 
 void loop() {
-  while(true){
+  if (takePhoto) {
     captureAndSend();
-    delay(2000);
+    takePhoto = false;
   }
 }
