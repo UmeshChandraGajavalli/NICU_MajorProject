@@ -109,15 +109,20 @@ def send_telegram_photo(image_path, caption):
 
 # ─── FACE RECOGNITION ─────────────────────────────────────────────────────────
 
-def identify_staff(image_path):
-    """
-    Compare violation photo against all photos in staff_db/.
-    Returns: (staff_name, confidence_percent)
-    If no match found or error: returns ("Unknown", 0)
+MODELS = {
+    "GhostFaceNet": 0.40,
+    "Facenet512":   0.30,
+}
 
-    Model: Facenet512 — handles compressed/low-quality JPEG better than ArcFace.
-    Detector: opencv — stable, no extra dependencies, works well for close-up faces.
-    """
+def extract_name_from_path(identity_path):
+    path        = identity_path.replace("\\", "/")
+    parts       = path.split("/")
+    folder_name = parts[-2] if len(parts) >= 2 else parts[0]
+    name_parts  = folder_name.split("_")
+    return " ".join(name_parts[2:]) if len(name_parts) > 2 else folder_name
+
+
+def identify_staff(image_path):
     print(f"[DeepFace] Running recognition on: {image_path}")
 
     if not os.path.exists(STAFF_DB_PATH):
@@ -134,44 +139,70 @@ def identify_staff(image_path):
 
     print(f"[DeepFace] Comparing against {len(staff_folders)} staff members...")
 
+    # ── Pre-filter: check a face is actually detectable ───────────────────────
     try:
-        results = DeepFace.find(
+        faces = DeepFace.extract_faces(
             img_path          = image_path,
-            db_path           = STAFF_DB_PATH,
-            model_name        = "Facenet512",  # handles ESP32-CAM JPEG compression well
-            detector_backend  = "opencv",      # stable, no extra deps
-            enforce_detection = False,         # don't crash on partial/masked faces
-            silent            = True
+            detector_backend  = "yunet",
+            enforce_detection = False
         )
+        if not faces:
+            print("[DeepFace] ✗ No face detected — skipping recognition")
+            return "Unknown", 0
 
-        if results and len(results[0]) > 0:
-            top_match  = results[0].iloc[0]
-            distance   = top_match["distance"]
-            confidence = round((1 - distance) * 100, 1)
+        face_h = faces[0]["facial_area"]["h"]
+        print(f"[DeepFace] Face detected — height: {face_h}px")
 
-            print(f"[DeepFace] Best match distance: {distance:.4f} → Confidence: {confidence}%")
-
-            if confidence >= CONFIDENCE_THRESHOLD:
-                # Path example: staff_db/staff_001_Dr_Ravi/front.jpg
-                identity_path = top_match["identity"].replace("\\", "/")
-                parts         = identity_path.split("/")
-                folder_name   = parts[-2] if len(parts) >= 2 else parts[0]
-
-                # folder_name = "staff_001_Dr_Ravi" → skip "staff" and "001"
-                name_parts = folder_name.split("_")
-                staff_name = " ".join(name_parts[2:]) if len(name_parts) > 2 else folder_name
-
-                print(f"[DeepFace] ✓ Identified: {staff_name} ({confidence}%)")
-                return staff_name, confidence
-            else:
-                print(f"[DeepFace] ✗ Best confidence {confidence}% is below threshold {CONFIDENCE_THRESHOLD}%")
-        else:
-            print("[DeepFace] ✗ No face detected in violation photo (empty result)")
+        if face_h < 60:
+            print(f"[DeepFace] ✗ Face too small ({face_h}px) — too far or too side-on")
+            return "Unknown", 0
 
     except Exception as e:
-        print(f"[DeepFace] ✗ Recognition error: {e}")
+        print(f"[DeepFace] ✗ Face pre-check error: {e}")
+        return "Unknown", 0
 
-    return "Unknown", 0
+    # ── Run each model separately, collect votes ──────────────────────────────
+    votes = {}
+
+    for model_name, max_distance in MODELS.items():
+        try:
+            results = DeepFace.find(
+                img_path          = image_path,
+                db_path           = STAFF_DB_PATH,
+                model_name        = model_name,    # ← single string, never the dict
+                detector_backend  = "yunet",
+                enforce_detection = False,
+                silent            = True
+            )
+
+            if results and len(results[0]) > 0:
+                top_match = results[0].iloc[0]
+                distance  = top_match["distance"]
+
+                print(f"[{model_name}] distance: {distance:.4f}  (threshold: <= {max_distance})")
+
+                if distance <= max_distance:
+                    name = extract_name_from_path(top_match["identity"])
+                    votes[model_name] = name
+                    print(f"[{model_name}] ✓ Passed → {name}")
+                else:
+                    print(f"[{model_name}] ✗ Rejected — distance {distance:.4f} too high")
+            else:
+                print(f"[{model_name}] ✗ No result returned")
+
+        except Exception as e:
+            print(f"[{model_name}] ✗ Error: {e}")
+
+    # ── Verdict: ALL models must agree on the same person ─────────────────────
+    identified = list(votes.values())
+
+    if len(identified) == len(MODELS) and len(set(identified)) == 1:
+        staff_name = identified[0]
+        print(f"[DeepFace] ✓ CONFIRMED: {staff_name} (all models agree)")
+        return staff_name, 100.0
+    else:
+        print(f"[DeepFace] ✗ Models disagree or rejected → Unknown  votes={votes}")
+        return "Unknown", 0
 
 
 # ─── DATABASE ─────────────────────────────────────────────────────────────────

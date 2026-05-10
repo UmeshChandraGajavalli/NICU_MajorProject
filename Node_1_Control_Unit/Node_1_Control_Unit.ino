@@ -6,8 +6,8 @@
 #include <algorithm>
 
 // -------- Configuration --------
-const char* ssid = "vivotg";
-const char* password = "12345678";
+const char* ssid = "Umesh";
+const char* password = "Umesh123@";
 const char* TOKEN = "84oGUFsFReeHJLsmXmoO";
 const char* THINGSBOARD_SERVER = "demo.thingsboard.io";
 const uint16_t THINGSBOARD_PORT = 1883;
